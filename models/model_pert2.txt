@@ -1,0 +1,125 @@
+model{
+    #---------------------------------------------#
+    # LIKELIHHOOD
+    #---------------------------------------------#
+    for (i in 1:N) {
+        ## Hurdle model : ##
+        # 1. Bernouilli for Presence/Absence
+        pa[i] ~ dbern(p[i])
+        # 2. Poisson for abundance
+        nb[i] ~ dpois(pa[i] * lambda[i])T(pa[i],)
+
+        ## Variables ##
+        # 1. Presence/Absence
+        logit(p[i]) <-
+            pa_intercept +
+            # variables spatio-temporelles
+            pa_t * year[i] +
+            pa_lat * latitude[i] +
+            pa_lon * longitude[i] +
+            pa_interaction_lat_t * latitude[i] * year[i] +
+            # variable de sol
+            pa_emo * epmatorg[i] +
+            pa_ph * ph_humus[i] +
+            pa_ph2 * ph_humus[i]**2 +
+            # variable biotique
+            pa_ba * total_ba[i] +
+            pa_sp * is_species[i] +
+            # perturbation
+            is_pl[i] * (pa_beta_pl + pa_TSD_pl * TSpl[i] + pa_TSD2_pl * TSpl[i]**2) +
+            is_l[i] * (pa_beta_l + pa_TSD_l * TSl[i] + pa_TSD2_l * TSl[i]**2) +
+            is_b[i] * (pa_beta_b + pa_TSD_b * TSb[i] + pa_TSD2_b * TSb[i]**2) +
+            is_o[i] * (pa_beta_o + pa_TSD_o * TSo[i] + pa_TSD2_o * TSo[i]**2) +
+            # effet aléatoire sur la placette
+            pa_placette[placette[i]]
+
+        # 2. Abundance
+        log(lambda[i]) <-
+            nb_intercept +
+            # variables spatio-temporelles
+            nb_t * year[i] +
+            nb_lat * latitude[i] +
+            nb_lon * longitude[i] +
+            nb_interaction_lat_t * latitude[i] * year[i] +
+            # variable de sol
+            nb_emo * epmatorg[i] +
+            nb_ph * ph_humus[i] +
+            nb_ph2 * ph_humus[i]**2 +
+            # variable biotique
+            nb_ba * total_ba[i] +
+            nb_sp * is_species[i] +
+            # Perturbation
+            is_pl[i] * (nb_beta_pl + nb_TSD_pl * TSpl[i] + nb_TSD2_pl * TSpl[i]**2) +
+            is_l[i] * (nb_beta_l + nb_TSD_l * TSl[i] + nb_TSD2_l * TSl[i]**2) +
+            is_b[i] * (nb_beta_b + nb_TSD_b * TSb[i] + nb_TSD2_b * TSb[i]**2) +
+            is_o[i] * (nb_beta_o + nb_TSD_o * TSo[i] + nb_TSD2_o * TSo[i]**2) +
+            # effet aléatoire sur la placette
+            nb_placette[placette[i]]
+
+    }
+    #---------------------------------------------#
+    # PRIORS
+    #---------------------------------------------#
+
+    # 1. Intercept
+    pa_intercept ~ dunif(-50,50)
+    nb_intercept ~ dunif(-50,50)
+
+    # 2. Spatial-temporal variables
+    pa_t ~ dunif(-50,50)
+    pa_lat ~ dunif(-50,50)
+    pa_lon ~ dunif(-50,50)
+    pa_interaction_lat_t ~ dunif(-50,50)
+    nb_t ~ dunif(-50,50)
+    nb_lat ~ dunif(-50,50)
+    nb_lon ~ dunif(-50,50)
+    nb_interaction_lat_t ~ dunif(-50,50)
+
+    # 3. Soil variables
+    pa_emo ~ dunif(-50,50)
+    pa_ph ~ dunif(-50,50)
+    pa_ph2 ~ dunif(-50,50)
+    nb_emo ~ dunif(-50,50)
+    nb_ph ~ dunif(-50,50)
+    nb_ph2 ~ dunif(-50,50)
+
+    # 4. Biotic variables
+    pa_ba ~ dunif(-50,50)
+    pa_sp ~ dunif(-50,50)
+    nb_ba ~ dunif(-50,50)
+    nb_sp ~ dunif(-50,50)
+
+    # 5. perturbation
+    pa_beta_pl ~ dunif(-50,50)
+    pa_beta_l ~ dunif(-50,50)
+    pa_beta_b ~ dunif(-50,50)
+    pa_beta_o ~ dunif(-50,50)
+    pa_TSD_pl ~ dunif(-50,50)
+    pa_TSD_l ~ dunif(-50,50)
+    pa_TSD_b ~ dunif(-50,50)
+    pa_TSD_o ~ dunif(-50,50)
+    pa_TSD2_pl ~ dunif(-50,50)
+    pa_TSD2_l ~ dunif(-50,50)
+    pa_TSD2_b ~ dunif(-50,50)
+    pa_TSD2_o ~ dunif(-50,50)
+    nb_beta_pl ~ dunif(-50,50)
+    nb_beta_l ~ dunif(-50,50)
+    nb_beta_b ~ dunif(-50,50)
+    nb_beta_o ~ dunif(-50,50)
+    nb_TSD_pl ~ dunif(-50,50)
+    nb_TSD_l ~ dunif(-50,50)
+    nb_TSD_b ~ dunif(-50,50)
+    nb_TSD_o ~ dunif(-50,50)
+    nb_TSD2_pl ~ dunif(-50,50)
+    nb_TSD2_l ~ dunif(-50,50)
+    nb_TSD2_b ~ dunif(-50,50)
+    nb_TSD2_o ~ dunif(-50,50)
+
+    # 6. Random effect
+    for (pl in 1:n_placettes) {
+        pa_placette[pl] ~ dnorm(0, tau1)
+        nb_placette[pl] ~ dnorm(0, tau2)
+    }
+    tau1 ~ dunif(0, 10)
+    tau2 ~ dunif(0, 10)
+}

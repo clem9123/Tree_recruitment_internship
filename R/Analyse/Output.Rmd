@@ -1,0 +1,609 @@
+---
+author : "Clementine"
+date : "2023-03-18"
+title : "Update"
+output : pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_knit$set(root.dir = "../../")
+```
+
+# Model
+
+The model il as follow :
+
+$$Presence = \mathcal{B}(p, 1)$$
+$$Densite = \begin{cases}
+0 & \text{if Presence = 0} \\
+\mathcal{P}(lambda) & \text{if Presence = 1}
+\end{cases}
+$$
+
+With :
+
+$p = \\$
+    $pa\_intercept + \\
+    \textbf{variables spatio-temporelles} \\
+    pa\_t * year + pa\_lat * latitude + pa\_lon * longitude \\
+    \textbf{variable de sol} \\
+    pa\_emo * epmatorg + pa\_ph * ph\_humus + \\
+    \textbf{variable biotique} \\
+    pa\_ba * total\_ba + pa\_sp * is\_species + \\
+    \textbf{perturbation} \\
+    is\_pl * (pa\_beta\_pl + pa\_TSD\_pl * TSpl + pa\_TSD2\_pl * TSpl^2) + \\
+    is\_l * (pa\_beta\_l + pa\_TSD\_l * TSl + pa\_TSD2\_l * TSl^2) + \\
+    is\_b * (pa\_beta\_b + pa\_TSD\_b * TSb + pa\_TSD2\_b * TSb^2) + \\
+    is\_o * (pa\_beta\_o + pa\_TSD\_o * TSo + pa\_TSD2\_o * TSo^2)$
+
+
+$lambda = \\$
+    $nb\_intercept + \\
+    \textbf{variables spatio-temporelles} \\
+    nb\_t * year + nb\_lat * latitude + nb\_lon * longitude \\
+    \textbf{variable de sol} \\
+    nb\_emo * epmatorg + nb\_ph * ph\_humus + \\
+    \textbf{variable biotique} \\
+    nb\_ba * total\_ba + nb_sp * is\_species + \\
+    \textbf{perturbation} \\
+    is\_pl * (nb\_beta\_pl + nb\_TSD\_pl * TSpl + nb\_TSD2\_pl * TSpl^2) + \\
+    is\_l * (nb\_beta\_l + nb\_TSD\_l * TSl + nb\_TSD2\_l * TSl^2) + \\
+    is\_b * (nb\_beta\_b + nb\_TSD\_b * TSb + nb\_TSD2\_b * TSb^2) + \\
+    is\_o * (nb\_beta\_o + nb\_TSD\_o * TSo + nb\_TSD2\_o * TSo^2)$
+
+Tableau des paramètres (pour p avec le préfixe pa et pour lambda nb) :
+
+| Paramètre        |Description (coefficient pour)     |
+| :-------------: | -------------: |
+| intercept       | Intercept  |
+| t               | temps |
+| lat             | latitude |
+| lon             | longitude |
+| interaction_lat_t | interaction entre la latitude et le temps |
+| emo             | epaisseur matière organique |
+| ph              | ph humus |
+| ba              | total basal area |
+| sp              | présence de l'espèce |
+| beta         | perturbation |
+| TSD et TSD2          | temps depuis la perturbation et son carré |
+| is_pl, is_l, is_b, is_o | présence de la perturbation |
+|pl | partial_logging |
+|l | logging |
+|b | burning |
+|o | outbreak |
+
+
+# Output Data
+
+Tourné sur les espèces :
+
+| code | nom | Zone (??)| Source |
+| :-------------: | -------------: | -------------: | -------------: |
+| AUR | Aulne Rugueux | Tempérée | |
+| BOJ | Bouleau jaune | Tempérée | |
+| BOP | Bouleau à papier | Boréale | Fischelli 2013 Tbl1|
+| ERE | Erable à Epis | Tempérée | |
+| ERS | Erable à sucre | Tempérée | Fischelli 2013 Tbl1|
+| ERR | Erable rouge | Tempérée | Fischelli 2013 Tbl1|
+| EPN | Epinette noire | Boréale | Fischelli 2013 Tbl1|
+| EPB | Epinette Blanche | Boréale | |
+| ERP | Erable de Pennsylvanie | Tempérée | |
+| PIG | Pin gris | Boréale | |
+| PET | Peuplier faux tremble | Boréale | Fischelli 2013 Tbl1|
+| PRP | Cerisier de Pennsylvanie | Tempérée |
+| SAL | Saule | Tempérée |
+| SOA | Sorbier d'amérique | Tempérée |
+| THO | Thuya occidental | Boréale |
+
+Fischelli 2013 Tbl1 : We designated each tree species as 'temperate' or
+'boreal' based on northern and southern range limits mapped by Little (1971).
+
+Besoin de : vérifier les zones des espèces pour faire tourner un modèle boréale et tempérée.
+Et confirmer les espèces choisies en général.
+
+Je vais lire cet après-midi, ce qui va probablement m'aider un peu avec ça. 
+Je vais aussi re-regarder ce que tu m'avais dit sur le sujet XD. 
+Mais je t'envoie quand même ce que j'ai fait pour l'instant. Pour que tu vois 
+ce que l'on obteient avec le modèle.
+
+Info sur les espèces : https://aimfc.rncan.gc.ca/fr/arbres/fiche/16
+
+```{r}
+library(tidyverse)
+library(bayesplot)
+library(patchwork)
+library(boot)
+library(scales)
+library(R2jags)
+```
+
+## Présence des espèces concidérees (au stade gaule)
+
+```{r}
+data <- readRDS("data/full_data.RDS")
+tbl <- data %>% group_by(essence) %>% summarize(nb = sum(presence_gaule))
+
+sp_type <- read.csv("Documentation/Tree_sp.csv")
+
+full <- merge(tbl, sp_type)
+
+ggplot(full %>% filter(nb >0)) +
+geom_bar(aes(x = essence, y = nb), stat = "identity") +
+theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+labs(x = "Espèce", y = "Nombre d'individus")
+```
+
+## Figure des sorties pour 4 espèces : SAB, ERE, BOP, ERR
+
+Moyenne et distribution des sorties pour les différents paramètres.
+La forme des sorties : chaines de markov pour chaque paramètre.
+
+```{r}
+load("output/SAB.RData")
+load("output/ERE.RData")
+load("output/BOP.RData")
+load("output/ERR.RData")
+parameters = c(
+    # Intercept
+    "pa_intercept",
+    "nb_intercept",
+    # Spatial-temporal variables
+    "pa_t", "pa_lat", "pa_lon", "pa_interaction_lat_t",
+    "nb_t", "nb_lat", "nb_lon", "nb_interaction_lat_t",
+    # Soil variables
+    "pa_emo", "pa_ph",
+    "nb_emo", "nb_ph",
+    # Biotic variables
+    "pa_ba", "pa_sp",
+    "nb_ba", "nb_sp",
+    # Perturbation
+    "pa_beta_pl", "pa_TSD_pl", "pa_TSD2_pl",
+    "pa_beta_l", "pa_TSD_l", "pa_TSD2_l",
+    "pa_beta_b", "pa_TSD_b", "pa_TSD2_b",
+    "pa_beta_o", "pa_TSD_o", "pa_TSD2_o",
+    "nb_beta_pl", "nb_TSD_pl", "nb_TSD2_pl",
+    "nb_beta_l", "nb_TSD_l", "nb_TSD2_l",
+    "nb_beta_b", "nb_TSD_b", "nb_TSD2_b",
+    "nb_beta_o", "nb_TSD_o", "nb_TSD2_o"
+)
+```
+
+# Quick overview
+
+## Les paramètres en sorties avec les intervalles de confiance à 95%
+
+```{r}
+param_SAB <- mcmc_intervals(as.mcmc(model_SAB), pars = parameters) +
+labs(title = "parameters output Sapin Baumier (SAB)")
+param_ERE <- mcmc_intervals(as.mcmc(model_ERE), pars = parameters) +
+labs(title = "parameters output Erable à epis (ERE)")
+param_BOP <- mcmc_intervals(as.mcmc(model_BOP), pars = parameters) +
+labs(title = "parameters output Bouleau à papier (BOP)")
+param_ERR <- mcmc_intervals(as.mcmc(model_ERR), pars = parameters) +
+labs(title = "parameters output Erable rouge (ERR)")
+
+param_SAB
+param_ERE 
+param_BOP
+param_ERR
+```
+
+On a une mauvaise convergence pour les aramètres liés au temps depuis les 
+perturbation de type burn. (due au faible nombre d'observation pour ce type de 
+perturbation ~ 50)
+
+## Les paramètres de sorties sans burn pour une meilleurs visualisation
+
+```{r}
+parameters_short = c(
+    # Intercept
+    "pa_intercept",
+    "nb_intercept",
+    # Spatial-temporal variables
+    "pa_t", "pa_lat", "pa_lon", "pa_interaction_lat_t",
+    "nb_t", "nb_lat", "nb_lon", "nb_interaction_lat_t",
+    # Soil variables
+    "pa_emo", "pa_ph",
+    "nb_emo", "nb_ph",
+    # Biotic variables
+    "pa_ba", "pa_sp",
+    "nb_ba", "nb_sp",
+    # Perturbation
+    "pa_beta_pl", "pa_TSD_pl", "pa_TSD2_pl",
+    "pa_beta_l", "pa_TSD_l", "pa_TSD2_l",
+    #"pa_beta_b", "pa_TSD_b", "pa_TSD2_b",
+    "pa_beta_o", "pa_TSD_o", "pa_TSD2_o",
+    "nb_beta_pl", "nb_TSD_pl", "nb_TSD2_pl",
+    "nb_beta_l", "nb_TSD_l", "nb_TSD2_l",
+    #"nb_beta_b", "nb_TSD_b", "nb_TSD2_b",
+    "nb_beta_o", "nb_TSD_o", "nb_TSD2_o"
+)
+short_param_SAB <- mcmc_intervals(as.mcmc(model_SAB), pars = parameters_short) +
+labs(title = "parameters output SAB")
+short_param_ERE <- mcmc_intervals(as.mcmc(model_ERE), pars = parameters_short) +
+labs(title = "parameters output ERE")
+short_param_BOP <- mcmc_intervals(as.mcmc(model_BOP), pars = parameters_short) +
+labs(title = "parameters output BOP")
+short_param_ERR <- mcmc_intervals(as.mcmc(model_ERR), pars = parameters_short) +
+labs(title = "parameters output ERR")
+
+short_param_SAB
+short_param_ERE
+short_param_BOP
+short_param_ERR
+```
+
+# Effets de certains paramètres sur la présence et l'abondance de quelques espèces
+
+Utilisation des moyennes des sorties simplement donc là pas de prise en compte de l'incertitude.
+
+Par contre comment prendre en compte le fait qu'on a scale les variables ?
+Et rapport avec le log et logit aussi ?
+
+J'ai utilisé la fonctin inv.logit, pour l'effet du ph par exemple (pour presence absence i.e. pa):
+$inv.logit(pa\_ph * ph + pa\_ph2 * ph)$
+
+Avec :
+
+- pa_ph et pa_ph2 : la moyenne de la sortie du paramètre pour chaque
+- Et comme ph j'utilise la variable scaled que j'ai utilisé dans la modélisation
+Par contre dans le plot j'utilise la variable non scalée associée.
+
+Légende à chaque fois :
+
+- titre p(x) : effet de x sur la probabilité de présence
+- titre lambda(x) : effet de x sur l'abondance
+- avec x = ph, emo, lat, lon, t, ba, pl, l, b, o 
+(ph, epaisseur matière organique, latitude, longitude, temps, basal area,
+partial logging, logging, burn, outbreak)
+
+```{r}
+transform_p <- function(sp, x, var){
+    model = get(paste0("model_", sp))
+    return(inv.logit(
+        as.numeric(model$BUGSoutput$mean[paste0("pa_",var)]) * x))
+}
+
+transform_lambda <- function(sp, x, var){
+    model = get(paste0("model_", sp))
+    return(exp(
+        as.numeric(model$BUGSoutput$mean[paste0("nb_",var)]) * x))
+}
+
+link <- function(sps, x, param = "p", var, TRUE_x){
+    df = data.frame()
+    for (sp in sps){
+        df <- rbind(df, data.frame(
+                x = TRUE_x,
+                result = get(paste0("transform_", param))(sp, x, var),
+                essence = sp))
+    }
+    return(df)
+}
+
+plot_link <- function(sps, x, param = "p", var, TRUE_x){
+    df = link(sps, x, param, var, TRUE_x)
+    ggplot(df) +
+        #geom_point(aes(x = x, y = result, color = essence)) +
+        geom_line(aes(x = x, y = result, color = essence)) +
+        labs(title = paste0(param,"(", var,")"),
+            x = var,
+            y = param)
+}
+```
+
+## Effet des perturbation et du temps depuis la perturbation
+
+$inv.logit(pa\_beta + pa\_TSD * TSD + pa\_TSD2 * TSD^2)$
+
+TSD : time since disturbance
+
+pa_beta, pa_TSD, pa_TSD2 : les paramètres de la modélisation
+
+pareil avec : nb_beta, nb_TSD, nb_TSD2
+
+```{r}
+data0 <- readRDS("data/full_data.rds") %>% filter(essence == "ERR")
+data <- data0 %>% mutate(
+    year_measured_sc = scale(year_measured)[,],
+    latitude_sc = scale(latitude)[,],
+    longitude_sc = scale(longitude)[,],
+    epmatorg_sc = scale(epmatorg)[,],
+    ph_humus_sc = scale(ph_humus)[,],
+    tree_ba_sc = scale(tree_ba)[,],
+    partial_logging_sc = scale(partial_logging)[,],
+    logging_sc = scale(logging)[,],
+    burn_sc = scale(burn)[,],
+    outbreak_sc = scale(outbreak)[,]
+)
+
+transform_pert_p <- function(sp, perturb, t){
+    model = get(paste0("model_", sp))
+    return(inv.logit(
+        as.numeric(model$BUGSoutput$mean[paste0("pa_beta_", perturb)]) +
+        as.numeric(model$BUGSoutput$mean[paste0("pa_TSD_", perturb)]) * t +
+        as.numeric(model$BUGSoutput$mean[paste0("pa_TSD2_", perturb)]) * t ^ 2))
+}
+
+transform_pert_lambda <- function(sp, perturb, t){
+    model = get(paste0("model_", sp))
+    return(exp(
+        as.numeric(model$BUGSoutput$mean[paste0("nb_beta_", perturb)]) +
+        as.numeric(model$BUGSoutput$mean[paste0("nb_TSD_", perturb)]) * t +
+        as.numeric(model$BUGSoutput$mean[paste0("nb_TSD2_", perturb)]) * t ^ 2))
+}
+
+link_pert <- function(sps, perturb, t, param = "p", True_t){
+    df = data.frame()
+    for (sp in sps){
+        df <- rbind(df, data.frame(
+                time = True_t,
+                result = get(paste0("transform_pert_", param))(sp, perturb, t), 
+                essence = sp))
+    }
+    return(df)
+}
+
+plot_link_pert <- function(sps, perturb, t, True_t, param = "p"){
+    df = link_pert(sps, perturb, t, param, True_t)
+    ggplot(df) +
+        #geom_point(aes(x = time, y = result, color = essence)) +
+        geom_line(aes(x = time, y = result, color = essence)) +
+        labs(title = paste0(param, "(", perturb, ")"),
+            x = "Time since perturbation", 
+            y = param)
+}
+```
+
+### sur la presence
+
+```{r}
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "pl",
+    na.omit(data$partial_logging_sc), na.omit(data$partial_logging)) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "l",
+    na.omit(data$logging_sc), na.omit(data$logging)) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "b",
+    na.omit(data$burn_sc), na.omit(data$burn)) +
+        theme(legend.position = "none") +
+        ylim(0,1)+ 
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "o",
+    na.omit(data$outbreak_sc), na.omit(data$outbreak))+
+        ylim(0,1)
+```
+
+### sur la densité
+
+```{r}
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "pl",
+na.omit(data$partial_logging_sc), na.omit(data$partial_logging), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "l",
+na.omit(data$logging_sc), na.omit(data$logging), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "b",
+na.omit(data$burn_sc), na.omit(data$burn), "lambda") +
+        theme(legend.position = "none") +
+    scale_y_continuous(trans= "log", label = scientific_format(digits = 1))+
+plot_link_pert(c("SAB", "ERE", "BOP", "ERR"), "o",
+na.omit(data$outbreak_sc), na.omit(data$outbreak), "lambda") +
+    scale_y_continuous(trans = "log", label = scientific_format(digits = 1))
+```
+
+## Effet du ph
+
+```{r}
+transform_ph_p <- function(sp, ph){
+    model = get(paste0("model_", sp))
+    return(inv.logit(
+        as.numeric(model$BUGSoutput$mean$pa_ph) * ph +
+        as.numeric(model$BUGSoutput$mean$pa_ph2) * ph ^ 2))
+}
+
+transform_ph_lambda <- function(sp, ph){
+    model = get(paste0("model_", sp))
+    return(exp(
+        as.numeric(model$BUGSoutput$mean$nb_ph) * ph +
+        as.numeric(model$BUGSoutput$mean$nb_ph2) * ph ^ 2))
+}
+
+link_ph <- function(sps, ph, param = "p"){
+    df = data.frame()
+    for (sp in sps){
+        df <- rbind(df, data.frame(
+                ph = data$ph_humus, 
+                result = get(paste0("transform_ph_", param))(sp, ph),
+                essence = sp))
+    }
+    return(df)
+}
+
+plot_link_ph <- function(sps, ph, param = "p"){
+    df = link_ph(sps, ph, param)
+    ggplot(df) +
+        #geom_point(aes(x = ph, y = result, color = essence)) +
+        geom_line(aes(x = ph, y = result, color = essence)) +
+        labs(title = paste0(param, "(ph)"),
+            x = "ph",
+            y = "param")
+}
+```
+
+```{r}
+plot_link_ph(c("SAB", "ERE", "BOP", "ERR"), data$ph_humus_sc) +
+        theme(legend.position = "none") +
+        ylim(0,1) +
+plot_link_ph(c("SAB", "ERE", "BOP", "ERR"), data$ph_humus_sc, param = "lambda")
+```
+
+
+## basal area (ba)
+
+```{r}
+plot_link(c("SAB", "ERE", "BOP", "ERR"), data$tree_ba_sc,
+     var = "ba", TRUE_x = data$tree_ba) +
+        theme(legend.position = "none") +
+        ylim(0,1) +
+plot_link(c("SAB", "ERE", "BOP", "ERR"), data$tree_ba_sc,
+    param = "lambda", var = "ba", TRUE_x = data$tree_ba)
+```
+
+## temps
+
+```{r}
+plot_link(c("SAB", "ERE", "BOP", "ERR"), data$year_measured_sc,
+    var = "t", TRUE_x = data$year_measured) +
+        theme(legend.position = "none") +
+        ylim(0,1) +
+plot_link(c("SAB", "ERE", "BOP", "ERR"), data$year_measured_sc,
+    param = "lambda", var = "t", TRUE_x = data$year_measured)
+```
+
+Question à moi même :
+Pourquoi l'effet du temps est positif sur SAB ?
+
+## interaction latitude temps Euh pour l'instant cette partie c'est n'importe quoi, j'y reviendrai
+
+```{r}
+a <- model_SAB$BUGSoutput$mean$pa_interaction_lat_t * data$year_measured_sc * data$latitude_sc
+b <- data.frame(int = a, t = data$year_measured, lat = data$latitude)
+ggplot(b) +
+ geom_point(aes(x = t, y = lat, color = int))
+```
+
+# Espèce boréales et tempérées
+
+En haut il y a les espèces : SAB, EPN, EPB, PIG (Boréales) et en bas les espèces : ERS, ERR, BOJ (Tempérées)
+
+```{r}
+load("output/SAB.RData")
+load("output/EPN.RData")
+load("output/EPB.RData")
+load("output/PIG.RData")
+
+load("output/ERS.RData")
+load("output/ERR.RData")
+load("output/BOJ.RData")
+```
+
+# latitude
+
+```{r}
+plot_link(c("SAB", "EPN", "EPB", "PIG"), data$latitude_sc,
+     var = "lat", TRUE_x = data$latitude) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link(c("SAB", "EPN", "EPB", "PIG"), data$latitude_sc,
+    param = "lambda", var = "lat", TRUE_x = data$latitude) +
+plot_link(c("ERS","ERR","BOJ"), data$latitude_sc,
+     var = "lat", TRUE_x = data$latitude) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link(c("ERS","ERR","BOJ"), data$latitude_sc,
+    param = "lambda", var = "lat", TRUE_x = data$latitude)
+```
+
+# longitude
+
+```{r}
+plot_link(c("SAB", "EPN", "EPB", "PIG"), data$longitude_sc,
+     var = "lon", TRUE_x = data$longitude) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link(c("SAB", "EPN", "EPB", "PIG"), data$longitude_sc,
+    param = "lambda", var = "lon", TRUE_x = data$longitude) +
+plot_link(c("ERS","ERR","BOJ"), data$longitude_sc,
+     var = "lon", TRUE_x = data$longitude) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link(c("ERS","ERR","BOJ"), data$longitude_sc,
+    param = "lambda", var = "lon", TRUE_x = data$longitude)
+```
+
+# ph_humus
+
+```{r}
+plot_link_ph(c("SAB", "EPN", "EPB", "PIG"), data$ph_humus_sc) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link_ph(c("SAB", "EPN", "EPB", "PIG"), data$ph_humus_sc, param = "lambda") +
+plot_link_ph(c("ERS","ERR","BOJ"), data$ph_humus_sc) +
+        theme(legend.position = "none") +
+        ylim(0,1)+
+plot_link_ph(c("ERS","ERR","BOJ"), data$ph_humus_sc, param = "lambda")
+```
+
+# epmatorg
+
+```{r}
+plot_link(c("SAB", "EPN", "EPB", "PIG"), data$epmatorg_sc,
+     var = "emo", TRUE_x = data$epmatorg) +
+        theme(legend.position = "none") +
+        ylim(0,1) +
+plot_link(c("SAB", "EPN", "EPB", "PIG"), data$epmatorg_sc,
+    param = "lambda", var = "emo", TRUE_x = data$epmatorg) +
+plot_link(c("ERS","ERR","BOJ"), data$epmatorg_sc,
+     var = "emo", TRUE_x = data$epmatorg) +
+        theme(legend.position = "none") +
+        ylim(0,1) +
+plot_link(c("ERS","ERR","BOJ"), data$epmatorg_sc,
+    param = "lambda", var = "emo", TRUE_x = data$epmatorg)
+```
+
+# Perturbation
+    
+```{r}
+plot_link_pert(c("SAB", "EPN", "EPB", "BOP", "PIG"), "pl", data$partial_logging_sc, data$partial_logging) +
+    ylim(0,1)+
+    theme(legend.position = "none") +
+plot_link_pert(c("SAB", "EPN", "EPB", "BOP", "PIG"), "l", data$logging_sc, data$logging) +
+    ylim(0,1)+
+plot_link_pert(c("ERS","ERR","BOJ"), "pl", data$partial_logging_sc, data$partial_logging) +
+    ylim(0,1) +
+    theme(legend.position = "none") +
+plot_link_pert(c("ERS","ERR","BOJ"), "l", data$logging_sc, data$logging) +
+    ylim(0,1)
+```
+
+# Next
+
+- [ ] Run un modèle avec les espèces boréales et un avec les espèces tempérées 
+(choisir ls espèces)
+- [x] Effet aléatoire de la placette
+- [x] Faire tourner sur les autres espèces
+- [x] ajouter ph2
+- [x] comprendre le lien avec les logit pour pouvoir interpreter et 
+faire des prédictions
+- [X] Comprendre le lien avec les scales et comment revenir au lien entre temps
+et proba sans (pareil pour le ph) Est ce que c'est possible ?
+Je pense que c'est ce que j'ai fait mais je ne suis pas certaine A VERIF, DISCUTER
+- [x] I faut vraiment que je clean mes codes et que je fasse un dossier propre
+
+# Dans l'analyse
+
+- [x] Faire les graphes pour les espèces boréales et tempérées
+- [ ] Vérifier les convergences pour les 18 sorties
+- [ ] Regarder les paramètres qui ont moins bien converger (ex : burn)
+Est ce que c'est parce que les données sont plus faibles ? Verifier
+- [ ] Verifier comment on code une interaction ! (pour latitude:temps)
+- [x] Ajouter les noms des espèces
+- [ ] Verifier les classifications des espèces en boréales et tempérées
+- [ ] Regarder si on peut extraire les coupes avec protection de la 
+regenerations des autres coupes totales (nb à vérifier >50 c'est juste et >100 
+c'est ok)
+- [ ] Je pourrais tester un modèle avec que les perturbations 
+(comparer deviance et DIC) selection de modele
+
+# A faire
+
+- [ ] Mail priors
+
+# Reflexion
+
+si on veut ajouter des perturbations il faudrait élargir la zone 
+(parce que là elles sont rares ici). Mais ça tourne bien.
+

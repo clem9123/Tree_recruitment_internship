@@ -1,0 +1,294 @@
+---
+author : "Clementine"
+date : "2023-02-28"
+title : "Project overview"
+output: html_document
+---
+
+# Questions
+
+How did recruitment dynamics changed in the Quebec boreal forest between the 
+periods 1970-1981 and 2005-2018 ?
+
+   - In term of presence and density
+   - For the common species
+   - How did perturbation influenced those changes
+   - What is the effect of other parameters (biotic or abiotic)
+
+*further question :*
+
+   - *Growth from saplings to trees*
+   - *What does it means for the future of the boreal forest ?*
+   - *Ecosystem shifts ?*
+
+To keep in mind for my report : **Ecosystem functionning**
+
+# Method
+
+## Data
+
+All the data from saplings
+Biologic parameters from tree_data
+Perturbation from pep_ori
+
+- 2 time periodes : 1970-1981 and 2005-2018 (to be confirmed)
+- Species : Sapin baumier, erable rouge, erable à sucre, bouleau jaune, 
+    bouleau à papier, epinette noire (beginning with sapin baumier and erable 
+    rouge to make the model)
+- Zone : All (to be confirmed)
+- Other selections :
+   - ph, epmatorg et cl_drai connues (au moins une fois pour la placette)
+    - pas de plantation
+    - date de perturbation connues
+
+*Would be interesting to think about including  seedlings*
+
+## Model
+
+Indépendant pour chaque espèces
+
+### Parameters
+
+### Abiotic
+
+- ph_humus
+- organic matter thickness
+- soil drainage ?
+- topographique ? (pente, altitude, exposition)
+
+#### Biotic
+
+- Basal area of the Species
+- Total basal area
+- Couvert ? (I don't know if I have enough data)
+- Species richness could be interesting
+
+Perhaps there are better ways to represent the adult population
+
+### Geographic
+
+- Latitude
+- Longitude
+
+### Perturbation
+
+- Type of disturbance
+- Time since disturbance
+
+### Effect of the periode
+
+On :
+
+- the intercept
+- the coef for latitude
+
+I assume that the effect of botic and abiotic parameters on recruitment are the 
+same for the 2 periodes (no evolution)
+
+## Model
+
+Two part hurdle model :
+    - First part : presence or absence of the species saplings
+    $$PA_i = \mathcal{B}(p_i)$$
+    - Second part : density of saplings
+    $$NB_i = \mathcal{P}(\lambda_i * presence_i)$$
+
+Avec (a completer avec les autres paramètres qui m'interessent):\
+\
+
+$$logit(p_i) = Intercept_{t} + \alpha_{t} * latitude_i +
+\gamma_{disturbance_i} + \gamma'_{disturbance_i} * TSD_i +
+\beta_1 * ph_i + \beta_2 * epmatorg_i + \beta_4 * longitude_i +
+\delta_{cl.drai_i}$$
+
+$$log(\lambda_i) = Intercept_{t} + \alpha_{t} * latitude_i +
+\gamma_{disturbance_i} + \gamma'_{disturbance_i} * TSD_i +
+\beta_1 * ph_i + \beta_2 * epmatorg_i + \beta_4 * longitude_i +
+\delta_{cl.drai_i}$$
+
+\
+__Note__ : different coef for lambda and p
+
+In consideration :
+
+- There might be parameters to add to the square knowing that the relation is
+not linear (example ph, TSD)
+- Living things don't only have linear or even polynomial relations, there are
+also limits (of ph for example simply for survival)
+- Interaction between parameters
+
+# Results exemple
+
+With reduced data for the exemple :
+
+- random sample of 1000 lines
+- For ERR (erable rouge)
+- 1 type of disturbance only : logging (all other pe are concidered as not 
+disturbed)
+
+__Note__ : I need to truncate the Poisson law but I have a problem with it
+
+```{r, include=FALSE, echo=FALSE}
+source("data.R")
+```
+
+## Model code
+
+```{r}
+model_pert <- function(){
+    # likelihood
+    for(i in 1:N){
+        pa[i] ~ dbern(p[i])
+        nb[i] ~ dpois(pa[i] * lambda[i]) # T(0,)
+
+        logit(p[i]) <-
+            intercept_pa[t[i]] +
+            lat_pa[t[i]] * latitude[i] +
+            lon_pa * longitude[i] +
+            ph_pa * ph_humus [i] +
+            ph_pa2 * (ph_humus [i])**2 +
+            epm_pa * epmatorg[i] +
+            beta * is_logging[i] +
+            gamma * TSlogging[i]
+        log(lambda[i]) <- 
+            intercept_nb[t[i]] +
+            lat_nb[t[i]] * latitude[i] +
+            lon_nb * longitude[i] +
+            ph_nb * ph_humus [i] +
+            ph_nb2 * (ph_humus [i])**2 +
+            epm_nb * epmatorg[i]
+        }
+
+    # priors
+    for (t in 1:2){
+        intercept_pa[t] ~ dunif(-10, 10)
+        lat_pa[t] ~ dunif(-10, 10)
+        intercept_nb[t] ~ dunif(-10, 10)
+        lat_nb[t] ~ dunif(-10, 10)
+    }
+    lon_pa ~ dunif(-10, 10)
+    ph_pa ~ dunif(-10, 10)
+    epm_pa ~ dunif(-10, 10)
+    lon_nb ~ dunif(-10, 10)
+    ph_nb ~ dunif(-10, 10)
+    epm_nb ~ dunif(-10, 10)
+    ph_nb2 ~ dunif(-10, 10)
+    ph_pa2 ~ dunif(-10, 10)
+    beta ~ dunif(-10, 10)
+    gamma ~ dunif(-1, 1)
+}
+```
+
+```{r, include=FALSE, echo=FALSE}
+
+full_data1_err <- full_data1 %>%
+    filter(essence == "ERR")
+
+full_data1_err <- full_data1_err %>%
+    mutate(periode = ifelse(year_measured < 1982, 1,
+        ifelse(year_measured > 2000, 2, NA))) %>%
+        select(periode, latitude, longitude, ph_humus, epmatorg, pourcpierr,
+            presence_gaule, all_cl,logging) %>%
+        na.omit() %>%
+        mutate(is_logging = ifelse(logging > 0, 1, 0))
+
+full_data1_err <- full_data1_err %>%
+    mutate(
+        latitude = scale(latitude)[,1],
+        longitude = scale(longitude)[,1],
+        ph_humus = scale(ph_humus)[,1],
+        epmatorg = scale(epmatorg)[,1],
+    )
+print(paste("Il y a ", nrow(full_data1_err), "lignes pour l'essence ERR"))
+
+# 1000 lignes au hasard
+netud = 1000
+full_data1_err <- full_data1_err %>%
+    sample_n(netud)
+print(paste("J'étudie",nrow(full_data1_err), "lignes pour commencer"))
+```
+
+```{r, include=FALSE, echo=FALSE}
+jags_data <- list(
+    N = nrow(full_data1_err),
+    t = full_data1_err$periode,
+    latitude = full_data1_err$latitude,
+    longitude = full_data1_err$longitude,
+    ph_humus = full_data1_err$ph_humus,
+    epmatorg = full_data1_err$epmatorg,
+    pa = full_data1_err$presence_gaule,
+    nb = full_data1_err$all_cl,
+    is_logging = full_data1_err$is_logging,
+    TSlogging = full_data1_err$logging
+)
+```
+    
+```{r, include=FALSE, echo=FALSE}
+old <- Sys.time()
+
+out_model <- jags(
+    model.file = model_pert,
+    data = jags_data,
+    n.chains = 3,
+    n.iter = 10000,
+    inits = function(){
+        list(
+            intercept_pa = runif(2, -10, 10),
+            lat_pa = runif(2, -10, 10),
+            intercept_nb = runif(2, -10, 10),
+            lat_nb = runif(2, -10, 10),
+            lon_pa = runif(1, -1, 1),
+            ph_pa = runif(1, -1, 1),
+            epm_pa = runif(1, -1, 0),
+            lon_nb = runif(1, -1, 1),
+            ph_nb = runif(1, -1, 1),
+            epm_nb = runif(1, -1, 1),
+            ph_pa2 = runif(1, -1, 1),
+            ph_nb2 = 0.001,
+            beta = 2.45,
+            gamma = -0.07
+        )},
+    parameters.to.save = c("intercept_pa", "lat_pa", "intercept_nb", "lat_nb",
+                           "lon_pa", "ph_pa", "epm_pa",
+                           "lon_nb", "ph_nb", "epm_nb",
+                           "ph_pa2", "ph_nb2", "beta", "gamma"),
+    n.burnin = 1000,
+    n.thin = 1,
+    DIC = TRUE
+)
+
+runtime = Sys.time() - old
+```
+
+## Model output
+
+```{r}
+print(runtime)
+```
+
+```{r}
+print(out_model)
+```
+
+## Parameters output
+
+```{r }
+mcmc_intervals(as.mcmc(out_model),
+    pars = c("intercept_pa[1]", "intercept_pa[2]", "lat_pa[1]", "lat_pa[2]",
+        "intercept_nb[1]", "intercept_nb[2]", "lat_nb[1]", "lat_nb[2]",
+        "lon_pa", "ph_pa", "epm_pa", "lon_nb", "ph_nb", "epm_nb",
+        "ph_pa2", "ph_nb2", "beta", "gamma"))
+```
+
+__Note__ : autoceralation and convergence are great
+
+__Note__ : priors may not be very good
+
+```{r}
+traceplot(out_model, ask = FALSE)
+```
+
+```{r}
+autocorr.plot(out_model, ask = FALSE)
+```
+

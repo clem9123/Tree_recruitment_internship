@@ -1,0 +1,338 @@
+# Espèce boréales et tempérées
+
+```{r}
+load("output/BOREALES.RData")
+load("output/TEMPEREES.RData")
+
+data_BOREALES <- tidyr::gather(data.frame(as.mcmc(model_BOREALES)[[1]]),
+    key = type_col, value = categories) %>%
+    mutate(type_col = factor(type_col))
+data_TEMPEREES <- tidyr::gather(data.frame(as.mcmc(model_TEMPEREES)[[1]]),
+    key = type_col, value = categories) %>%
+    mutate(type_col = factor(type_col))
+
+ggplot()+
+    geom_boxplot(data = data_BOREALES %>% filter(type_col != "deviance"),
+        aes(y = categories, x = type_col, color = "BOREALES")) +
+    geom_boxplot(data = data_TEMPEREES %>% filter(type_col != "deviance"),
+        aes(y = categories, x = type_col, color = "TEMPEREES")) +
+        # ecrire en vertical x
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+        labs(title = "parameters output")
+
+param_BOREALES <- mcmc_intervals(as.mcmc(model_BOREALES), pars = parameters) +
+labs(title = "parameters output boreales")
+param_TEMPEREES <- mcmc_intervals(as.mcmc(model_TEMPEREES), pars = parameters) +
+labs(title = "parameters output temperees")
+
+param_BOREALES
+param_TEMPEREES
+```
+
+quantile(x,probs=c(.025,.975))
+
+# Effet de tous les paramètres
+
+## latitude
+
+```{r}
+data0 <- readRDS("data/full_data.rds") %>% 
+    filter(essence %in% c("SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"))
+data <- data0 %>% mutate(
+    year_measured_sc = scale(year_measured)[,],
+    latitude_sc = scale(latitude)[,],
+    longitude_sc = scale(longitude)[,],
+    epmatorg_sc = scale(epmatorg)[,],
+    ph_humus_sc = scale(ph_humus)[,],
+    tree_ba_sc = scale(tree_ba)[,],
+    partial_logging_sc = scale(partial_logging)[,],
+    logging_sc = scale(logging)[,],
+    burn_sc = scale(burn)[,],
+    outbreak_sc = scale(outbreak)[,]
+)
+```
+
+```{r}
+transform_p <- function(sp, x, var){
+    model = get(paste0("model_", sp))
+    return(inv.logit(
+        as.numeric(model$BUGSoutput$mean[paste0("pa_",var)]) * x))
+}
+
+transform_lambda <- function(sp, x, var){
+    model = get(paste0("model_", sp))
+    return(exp(
+        as.numeric(model$BUGSoutput$mean[paste0("nb_",var)]) * x))
+}
+
+link <- function(sps, x, param = "p", var, TRUE_x){
+    df = data.frame()
+    for (sp in sps){
+        df <- rbind(df, data.frame(
+                x = TRUE_x,
+                result = get(paste0("transform_", param))(sp, x, var),
+                essence = sp))
+    }
+    return(df)
+}
+
+plot_link <- function(sps, x, param = "p", var, TRUE_x){
+    df = link(sps, x, param, var, TRUE_x)
+    ggplot(df) +
+        #geom_point(aes(x = x, y = result, color = essence)) +
+        geom_line(aes(x = x, y = result, color = essence)) +
+        labs(title = paste0(param,"(", var,")"),
+            x = var,
+            y = param)
+}
+```
+
+```{r}
+plot_link(c("BOREALES", "TEMPEREES"), data$latitude_sc, param = "p", var = "lat",
+    TRUE_x = data$latitude) +
+    theme(legend.position = "none") +
+plot_link(c("BOREALES", "TEMPEREES"), data$latitude_sc, param = "lambda", var = "lat",
+    TRUE_x = data$latitude)
+```
+
+## longitude
+
+```{r}
+plot_link(c("BOREALES", "TEMPEREES"), data$longitude_sc, param = "p", var = "lon",
+    TRUE_x = data$longitude) +
+    theme(legend.position = "none") +
+plot_link(c("BOREALES", "TEMPEREES"), data$longitude_sc, param = "lambda", var = "lon",
+    TRUE_x = data$longitude)
+```
+
+## epmatorg
+
+```{r}
+plot_link(c("BOREALES", "TEMPEREES"), data$epmatorg_sc, param = "p", var = "emo",
+    TRUE_x = data$epmatorg) +
+    theme(legend.position = "none") +
+plot_link(c("BOREALES", "TEMPEREES"), data$epmatorg_sc, param = "lambda", var = "emo",
+    TRUE_x = data$epmatorg)
+```
+
+# ph_humus
+
+```{r}
+plot_link_ph(c("BOREALES", "TEMPEREES"), data$ph_humus_sc, param = "p") +
+    theme(legend.position = "none") +
+plot_link_ph(c("BOREALES", "TEMPEREES"), data$ph_humus_sc, param = "lambda")
+```
+
+# tree_ba
+
+```{r}
+plot_link(c("BOREALES", "TEMPEREES"), data$tree_ba_sc, param = "p", var = "ba",
+    TRUE_x = data$tree_ba) +
+    theme(legend.position = "none") +
+plot_link(c("BOREALES", "TEMPEREES"), data$tree_ba_sc, param = "lambda", var = "ba",
+    TRUE_x = data$tree_ba)
+```
+
+# Perturbation
+
+```{r}
+plot_link_pert(c("BOREALES","TEMPEREES"), "pl",
+    na.omit(data$partial_logging_sc), na.omit(data$partial_logging)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES","TEMPEREES"), "l",
+    na.omit(data$logging_sc), na.omit(data$logging)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES","TEMPEREES"), "b",
+    na.omit(data$burn_sc), na.omit(data$burn)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES","TEMPEREES"), "o",
+    na.omit(data$outbreak_sc), na.omit(data$outbreak))
+```
+
+```{r}
+plot_link_pert(c("BOREALES","TEMPEREES"), "pl",
+    na.omit(data$partial_logging_sc), na.omit(data$partial_logging), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES","TEMPEREES"), "l",
+    na.omit(data$logging_sc), na.omit(data$logging), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES","TEMPEREES"), "b",
+    na.omit(data$burn_sc), na.omit(data$burn), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES","TEMPEREES"), "o",
+    na.omit(data$outbreak_sc), na.omit(data$outbreak), "lambda")
+```
+
+# Comparaison des espèces Boréales et de la moyenne : BOREALES
+
+- Boréales : SAB, ERE, EPN, EPB, AUR, ERP, SAL, PIG
+Sapin Baumier, Erable à Epis, Erable Noir, Erable de Norbège, Aulne Rugueux,
+Erable de Pennsylvanie, Saules, Pin gris
+
+```{r}
+load("output/BOREALES.RData")
+load("output/SAB.RData")
+load("output/ERE.RData")
+load("output/EPN.RData")
+load("output/EPB.RData")
+load("output/AUR.RData")
+load("output/ERP.RData")
+load("output/SAL.RData")
+load("output/PIG.RData")
+```
+
+## latitude
+
+```{r}
+plot_link(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$latitude_sc, param = "p", var = "lat",
+    TRUE_x = data$latitude) +
+    theme(legend.position = "none") +
+plot_link(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$latitude_sc, param = "lambda", var = "lat",
+    TRUE_x = data$latitude)
+```
+
+## longitude
+
+```{r}
+plot_link(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$longitude_sc, param = "p", var = "lon",
+    TRUE_x = data$longitude) +
+    theme(legend.position = "none") +  
+plot_link(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$longitude_sc, param = "lambda", var = "lon",
+    TRUE_x = data$longitude)
+```
+
+## epmatorg
+
+```{r}
+plot_link(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$epmatorg_sc, param = "p", var = "emo",
+    TRUE_x = data$epmatorg) +
+    theme(legend.position = "none") +
+plot_link(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$epmatorg_sc, param = "lambda", var = "emo",
+    TRUE_x = data$epmatorg)
+```
+
+## ph_humus
+
+```{r}
+plot_link_ph(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$ph_humus_sc, param = "p") +
+    theme(legend.position = "none") +
+plot_link_ph(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"),
+    data$ph_humus_sc, param = "lambda")
+```
+
+## Perturbation
+
+```{r}
+plot_link_pert(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"), "pl",
+    na.omit(data$partial_logging_sc), na.omit(data$partial_logging)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"), "l",
+    na.omit(data$logging_sc), na.omit(data$logging)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"), "b",
+    na.omit(data$burn_sc), na.omit(data$burn)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("BOREALES", "SAB", "ERE", "EPN", "EPB", "AUR", "ERP", "SAL", "PIG"), "o",
+    na.omit(data$outbreak_sc), na.omit(data$outbreak))
+```
+
+# Comparaison des espèces Tempérées et de la moyenne : TEMPEREES
+
+- Tempérées : BOP, ERR, ERS, BOJ, PET, PRP, SOA, THO
+(Bouleau à papier, Erable Rouge, Erable à sucre, Bouleau jaune, Peuplier faux tremble,
+Cerisier de Pennsylvanie, Sorbier d'amérique, Thuya occidental)
+
+```{r}
+load("output/TEMPEREES.RData")
+load("output/BOP.RData")
+load("output/ERR.RData")
+load("output/ERS.RData")
+load("output/BOJ.RData")
+load("output/PET.RData")
+load("output/PRP.RData")
+load("output/SOA.RData")
+load("output/THO.RData")
+```
+
+## latitude
+
+```{r}
+plot_link(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$latitude_sc, param = "p", var = "lat",
+    TRUE_x = data$latitude) +
+    theme(legend.position = "none") +
+plot_link(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$latitude_sc, param = "lambda", var = "lat",
+    TRUE_x = data$latitude)
+```
+
+## longitude
+
+```{r}
+plot_link(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$longitude_sc, param = "p", var = "lon",
+    TRUE_x = data$longitude) +
+    theme(legend.position = "none") +
+plot_link(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$longitude_sc, param = "lambda", var = "lon",
+    TRUE_x = data$longitude)
+```
+
+## epmatorg
+
+```{r}
+plot_link(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$epmatorg_sc, param = "p", var = "emo",
+    TRUE_x = data$epmatorg) +
+    theme(legend.position = "none") +
+plot_link(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$epmatorg_sc, param = "lambda", var = "emo",
+    TRUE_x = data$epmatorg)
+```
+
+## ph_humus
+
+```{r}
+plot_link_ph(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$ph_humus_sc, param = "p") +
+    theme(legend.position = "none") +
+plot_link_ph(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"),
+    data$ph_humus_sc, param = "lambda")
+```
+
+## Perturbation
+
+```{r}
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "pl",
+    na.omit(data$partial_logging_sc), na.omit(data$partial_logging)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "l",
+    na.omit(data$logging_sc), na.omit(data$logging)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "b",
+    na.omit(data$burn_sc), na.omit(data$burn)) +
+        theme(legend.position = "none") +
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "o",
+    na.omit(data$outbreak_sc), na.omit(data$outbreak))
+```
+
+```{r}
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "pl",
+    na.omit(data$partial_logging_sc), na.omit(data$partial_logging), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "l",
+    na.omit(data$logging_sc), na.omit(data$logging), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "b",
+    na.omit(data$burn_sc), na.omit(data$burn), "lambda") +
+        theme(legend.position = "none") +
+plot_link_pert(c("TEMPEREES", "BOP", "ERR", "ERS", "BOJ", "PET", "PRP", "SOA", "THO"), "o",
+    na.omit(data$outbreak_sc), na.omit(data$outbreak), "lambda")
+```
